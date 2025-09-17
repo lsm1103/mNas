@@ -1,0 +1,225 @@
+package nfs
+
+import (
+	"context"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/alist-org/alist/v3/internal/fs"
+	"github.com/alist-org/alist/v3/internal/model"
+	"github.com/go-git/go-billy/v5"
+	log "github.com/sirupsen/logrus"
+)
+
+// AlistFS 是将 alist 存储系统适配到 billy.Filesystem 接口的适配器
+type AlistFS struct {
+	root string
+}
+
+// NewAlistFS 创建一个新的 alist 文件系统适配器
+func NewAlistFS(root string) billy.Filesystem {
+	if root == "" {
+		root = "/"
+	}
+	return &AlistFS{
+		root: root,
+	}
+}
+
+// Create 创建一个新文件
+func (fs *AlistFS) Create(filename string) (billy.File, error) {
+	return fs.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+}
+
+// Open 打开一个文件进行读取
+func (fs *AlistFS) Open(filename string) (billy.File, error) {
+	return fs.OpenFile(filename, os.O_RDONLY, 0)
+}
+
+// OpenFile 以指定模式打开文件
+func (fs *AlistFS) OpenFile(filename string, flag int, perm os.FileMode) (billy.File, error) {
+	fullPath := fs.getFullPath(filename)
+
+	// 如果是写入模式，暂时返回错误（需要后续实现上传功能）
+	if flag&os.O_WRONLY != 0 || flag&os.O_RDWR != 0 || flag&os.O_CREATE != 0 {
+		return nil, os.ErrPermission
+	}
+
+	// 获取文件信息
+	obj, err := fs.getObject(fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if obj.IsDir() {
+		return nil, os.ErrInvalid
+	}
+
+	// 获取下载链接
+	link, err := fs.getDownloadLink(obj, fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewAlistFile(obj, link), nil
+}
+
+// Stat 获取文件信息
+func (fs *AlistFS) Stat(filename string) (os.FileInfo, error) {
+	fullPath := fs.getFullPath(filename)
+	obj, err := fs.getObject(fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &AlistFileInfo{obj: obj}, nil
+}
+
+// Rename 重命名文件
+func (fs *AlistFS) Rename(oldpath, newpath string) error {
+	// 暂时不支持重命名
+	return os.ErrPermission
+}
+
+// Remove 删除文件
+func (fs *AlistFS) Remove(filename string) error {
+	// 暂时不支持删除
+	return os.ErrPermission
+}
+
+// Join 连接路径
+func (fs *AlistFS) Join(elem ...string) string {
+	return filepath.Join(elem...)
+}
+
+// TempFile 创建临时文件
+func (fs *AlistFS) TempFile(dir, prefix string) (billy.File, error) {
+	return nil, os.ErrPermission
+}
+
+// ReadDir 读取目录
+func (fs *AlistFS) ReadDir(path string) ([]os.FileInfo, error) {
+	fullPath := fs.getFullPath(path)
+
+	// 获取目录对象
+	obj, err := fs.getObject(fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if !obj.IsDir() {
+		return nil, os.ErrInvalid
+	}
+
+	// 列出目录内容
+	objs, err := fs.listDirectory(obj, fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var infos []os.FileInfo
+	for _, o := range objs {
+		infos = append(infos, &AlistFileInfo{obj: o})
+	}
+
+	return infos, nil
+}
+
+// MkdirAll 创建目录（包括父目录）
+func (fs *AlistFS) MkdirAll(filename string, perm os.FileMode) error {
+	// 暂时不支持创建目录
+	return os.ErrPermission
+}
+
+// Lstat 获取链接信息
+func (fs *AlistFS) Lstat(filename string) (os.FileInfo, error) {
+	return fs.Stat(filename)
+}
+
+// Symlink 创建符号链接
+func (fs *AlistFS) Symlink(target, link string) error {
+	return os.ErrPermission
+}
+
+// Readlink 读取符号链接
+func (fs *AlistFS) Readlink(link string) (string, error) {
+	return "", os.ErrInvalid
+}
+
+// Chmod 修改文件权限
+func (fs *AlistFS) Chmod(name string, mode os.FileMode) error {
+	return os.ErrPermission
+}
+
+// Lchown 修改文件所有者
+func (fs *AlistFS) Lchown(name string, uid, gid int) error {
+	return os.ErrPermission
+}
+
+// Chown 修改文件所有者
+func (fs *AlistFS) Chown(name string, uid, gid int) error {
+	return os.ErrPermission
+}
+
+// Chtimes 修改文件时间
+func (fs *AlistFS) Chtimes(name string, atime time.Time, mtime time.Time) error {
+	return os.ErrPermission
+}
+
+// getFullPath 获取完整路径
+func (fs *AlistFS) getFullPath(filename string) string {
+	if strings.HasPrefix(filename, "/") {
+		return filename
+	}
+	return filepath.Join(fs.root, filename)
+}
+
+// getObject 通过路径获取 alist 对象
+func (afs *AlistFS) getObject(path string) (model.Obj, error) {
+	ctx := context.Background()
+	obj, err := afs.Get(ctx, path, "", model.CommonArgs{})
+	if err != nil {
+		log.Errorf("Failed to get object %s: %v", path, err)
+		return nil, os.ErrNotExist
+	}
+	return obj, nil
+}
+
+// listDirectory 列出目录内容
+func (afs *AlistFS) listDirectory(dir model.Obj, path string) ([]model.Obj, error) {
+	ctx := context.Background()
+	objs, err := afs.List(ctx, dir, model.CommonArgs{})
+	if err != nil {
+		log.Errorf("Failed to list directory %s: %v", path, err)
+		return nil, err
+	}
+	return objs, nil
+}
+
+// getDownloadLink 获取下载链接
+func (afs *AlistFS) getDownloadLink(obj model.Obj, path string) (*model.Link, error) {
+	ctx := context.Background()
+	link, err := afs.Link(ctx, obj, model.LinkArgs{})
+	if err != nil {
+		log.Errorf("Failed to get download link for %s: %v", path, err)
+		return nil, err
+	}
+	return link, nil
+}
+
+// 这些方法通过 alist 的 fs 包来实现
+
+func (afs *AlistFS) Get(ctx context.Context, path string, password string, args model.CommonArgs) (model.Obj, error) {
+	return fs.Get(ctx, path, password, args)
+}
+
+func (afs *AlistFS) List(ctx context.Context, dir model.Obj, args model.CommonArgs) ([]model.Obj, error) {
+	return fs.List(ctx, dir, args)
+}
+
+func (afs *AlistFS) Link(ctx context.Context, file model.Obj, args model.LinkArgs) (*model.Link, error) {
+	return fs.Link(ctx, file, args)
+}
