@@ -157,6 +157,19 @@ the address is defined in config file`,
 				}()
 			}
 		}
+
+		// 启动 NFS 服务器
+		err := server.StartNFS()
+		if err != nil {
+			utils.Log.Errorf("failed to start NFS server: %s", err.Error())
+		}
+
+		// 启动 SMB 服务器
+		err = server.StartSMB()
+		if err != nil {
+			utils.Log.Errorf("failed to start SMB server: %s", err.Error())
+		}
+
 		// Wait for interrupt signal to gracefully shutdown the server with
 		// a timeout of 1 second.
 		quit := make(chan os.Signal, 1)
@@ -217,6 +230,29 @@ the address is defined in config file`,
 				}
 			}()
 		}
+
+		// 停止 NFS 服务器
+		if conf.Conf.NFS.Enable {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := server.StopNFS(); err != nil {
+					utils.Log.Error("NFS server shutdown err: ", err)
+				}
+			}()
+		}
+
+		// 停止 SMB 服务器
+		if conf.Conf.SMB.Enable {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := server.StopSMB(); err != nil {
+					utils.Log.Error("SMB server shutdown err: ", err)
+				}
+			}()
+		}
+
 		wg.Wait()
 		utils.Log.Println("Server exit")
 	},

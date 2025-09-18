@@ -2,7 +2,6 @@ package nfs
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,6 +168,17 @@ func (fs *AlistFS) Chtimes(name string, atime time.Time, mtime time.Time) error 
 	return os.ErrPermission
 }
 
+// Chroot 切换根目录
+func (fs *AlistFS) Chroot(path string) (billy.Filesystem, error) {
+	newRoot := fs.getFullPath(path)
+	return NewAlistFS(newRoot), nil
+}
+
+// Root 返回根目录
+func (fs *AlistFS) Root() string {
+	return fs.root
+}
+
 // getFullPath 获取完整路径
 func (fs *AlistFS) getFullPath(filename string) string {
 	if strings.HasPrefix(filename, "/") {
@@ -180,7 +190,7 @@ func (fs *AlistFS) getFullPath(filename string) string {
 // getObject 通过路径获取 alist 对象
 func (afs *AlistFS) getObject(path string) (model.Obj, error) {
 	ctx := context.Background()
-	obj, err := afs.Get(ctx, path, "", model.CommonArgs{})
+	obj, err := afs.Get(ctx, path)
 	if err != nil {
 		log.Errorf("Failed to get object %s: %v", path, err)
 		return nil, os.ErrNotExist
@@ -191,7 +201,7 @@ func (afs *AlistFS) getObject(path string) (model.Obj, error) {
 // listDirectory 列出目录内容
 func (afs *AlistFS) listDirectory(dir model.Obj, path string) ([]model.Obj, error) {
 	ctx := context.Background()
-	objs, err := afs.List(ctx, dir, model.CommonArgs{})
+	objs, err := afs.List(ctx, path)
 	if err != nil {
 		log.Errorf("Failed to list directory %s: %v", path, err)
 		return nil, err
@@ -202,7 +212,7 @@ func (afs *AlistFS) listDirectory(dir model.Obj, path string) ([]model.Obj, erro
 // getDownloadLink 获取下载链接
 func (afs *AlistFS) getDownloadLink(obj model.Obj, path string) (*model.Link, error) {
 	ctx := context.Background()
-	link, err := afs.Link(ctx, obj, model.LinkArgs{})
+	link, _, err := afs.Link(ctx, path, model.LinkArgs{})
 	if err != nil {
 		log.Errorf("Failed to get download link for %s: %v", path, err)
 		return nil, err
@@ -212,14 +222,14 @@ func (afs *AlistFS) getDownloadLink(obj model.Obj, path string) (*model.Link, er
 
 // 这些方法通过 alist 的 fs 包来实现
 
-func (afs *AlistFS) Get(ctx context.Context, path string, password string, args model.CommonArgs) (model.Obj, error) {
-	return fs.Get(ctx, path, password, args)
+func (afs *AlistFS) Get(ctx context.Context, path string) (model.Obj, error) {
+	return fs.Get(ctx, path, &fs.GetArgs{})
 }
 
-func (afs *AlistFS) List(ctx context.Context, dir model.Obj, args model.CommonArgs) ([]model.Obj, error) {
-	return fs.List(ctx, dir, args)
+func (afs *AlistFS) List(ctx context.Context, path string) ([]model.Obj, error) {
+	return fs.List(ctx, path, &fs.ListArgs{})
 }
 
-func (afs *AlistFS) Link(ctx context.Context, file model.Obj, args model.LinkArgs) (*model.Link, error) {
-	return fs.Link(ctx, file, args)
+func (afs *AlistFS) Link(ctx context.Context, path string, args model.LinkArgs) (*model.Link, model.Obj, error) {
+	return fs.Link(ctx, path, args)
 }

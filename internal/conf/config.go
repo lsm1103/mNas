@@ -93,6 +93,18 @@ type SFTP struct {
 	Listen string `json:"listen" env:"LISTEN"`
 }
 
+type NFS struct {
+	Enable  bool   `json:"enable" env:"ENABLE"`
+	Address string `json:"address" env:"ADDRESS"`
+	Port    int    `json:"port" env:"PORT"`
+}
+
+type SMB struct {
+	Enable  bool   `json:"enable" env:"ENABLE"`
+	Address string `json:"address" env:"ADDRESS"`
+	Port    int    `json:"port" env:"PORT"`
+}
+
 type Config struct {
 	Force                 bool        `json:"force" env:"FORCE"`
 	SiteURL               string      `json:"site_url" env:"SITE_URL"`
@@ -115,6 +127,8 @@ type Config struct {
 	S3                    S3          `json:"s3" envPrefix:"S3_"`
 	FTP                   FTP         `json:"ftp" envPrefix:"FTP_"`
 	SFTP                  SFTP        `json:"sftp" envPrefix:"SFTP_"`
+	NFS                   NFS         `json:"nfs" envPrefix:"NFS_"`
+	SMB                   SMB         `json:"smb" envPrefix:"SMB_"`
 	LastLaunchedVersion   string      `json:"last_launched_version"`
 }
 
@@ -211,6 +225,16 @@ func DefaultConfig() *Config {
 		SFTP: SFTP{
 			Enable: false,
 			Listen: ":5222",
+		},
+		NFS: NFS{
+			Enable:  false,
+			Address: "0.0.0.0",
+			Port:    2049,
+		},
+		SMB: SMB{
+			Enable:  false,
+			Address: "0.0.0.0",
+			Port:    445,
 		},
 		LastLaunchedVersion: "",
 	}

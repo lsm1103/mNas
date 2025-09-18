@@ -118,7 +118,7 @@ func (f *AlistFile) getReader() (io.ReadCloser, error) {
 	case f.link.URL != "":
 		// HTTP 链接
 		return f.getHTTPReader()
-	case f.link.FilePath != nil:
+	case f.link.MFile != nil:
 		// 本地文件路径
 		return f.getFileReader()
 	default:
@@ -135,10 +135,10 @@ func (f *AlistFile) getHTTPReader() (io.ReadCloser, error) {
 
 // getFileReader 获取文件读取器
 func (f *AlistFile) getFileReader() (io.ReadCloser, error) {
-	if f.link.FilePath == nil {
+	if f.link.MFile == nil {
 		return nil, os.ErrInvalid
 	}
-	return os.Open(*f.link.FilePath)
+	return f.link.MFile, nil
 }
 
 // AlistFileInfo 实现 os.FileInfo 接口
@@ -166,10 +166,7 @@ func (fi *AlistFileInfo) Mode() os.FileMode {
 
 // ModTime 返回修改时间
 func (fi *AlistFileInfo) ModTime() time.Time {
-	if modTime := fi.obj.ModTime(); modTime != nil {
-		return *modTime
-	}
-	return time.Now()
+	return fi.obj.ModTime()
 }
 
 // IsDir 判断是否为目录
