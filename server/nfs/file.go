@@ -1,12 +1,16 @@
 package nfs
 
 import (
+	"bytes"
 	"io"
+	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/go-git/go-billy/v5"
+	log "github.com/sirupsen/logrus"
 )
 
 // AlistFile 实现 billy.File 接口
@@ -128,9 +132,41 @@ func (f *AlistFile) getReader() (io.ReadCloser, error) {
 
 // getHTTPReader 获取 HTTP 读取器
 func (f *AlistFile) getHTTPReader() (io.ReadCloser, error) {
-	// 这里需要实现 HTTP 流读取
-	// 暂时返回错误，需要后续完善
-	return nil, os.ErrPermission
+	if f.link.URL == "" {
+		return nil, os.ErrInvalid
+	}
+
+	// 创建 HTTP 请求
+	req, err := http.NewRequest("GET", f.link.URL, nil)
+	if err != nil {
+		log.Errorf("Failed to create HTTP request for %s: %v", f.link.URL, err)
+		return nil, err
+	}
+
+	// 添加必要的请求头
+	if f.link.Header != nil {
+		for key, values := range f.link.Header {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
+	}
+
+	// 发送请求
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Errorf("Failed to fetch HTTP content from %s: %v", f.link.URL, err)
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		log.Errorf("HTTP request failed with status %d for %s", resp.StatusCode, f.link.URL)
+		return nil, os.ErrPermission
+	}
+
+	return resp.Body, nil
 }
 
 // getFileReader 获取文件读取器
@@ -159,9 +195,9 @@ func (fi *AlistFileInfo) Size() int64 {
 // Mode 返回文件模式
 func (fi *AlistFileInfo) Mode() os.FileMode {
 	if fi.obj.IsDir() {
-		return os.ModeDir | 0755
+		return os.ModeDir | 0755  // 目录权限：rwxr-xr-x
 	}
-	return 0644
+	return 0644  // 文件权限：rw-r--r--
 }
 
 // ModTime 返回修改时间
@@ -177,4 +213,108 @@ func (fi *AlistFileInfo) IsDir() bool {
 // Sys 返回底层数据
 func (fi *AlistFileInfo) Sys() interface{} {
 	return fi.obj
+}
+
+// WritableAlistFile 实现可写的 billy.File 接口（用于上传）
+type WritableAlistFile struct {
+	path   string
+	fs     *AlistFS
+	buffer *bytes.Buffer
+	name   string
+	closed bool
+}
+
+// NewWritableAlistFile 创建一个新的可写 AlistFile
+func NewWritableAlistFile(path string, fs *AlistFS) billy.File {
+	name := filepath.Base(path)
+	return &WritableAlistFile{
+		path:   path,
+		fs:     fs,
+		buffer: bytes.NewBuffer(nil),
+		name:   name,
+		closed: false,
+	}
+}
+
+// Name 返回文件名
+func (f *WritableAlistFile) Name() string {
+	return f.name
+}
+
+// Write 写入数据
+func (f *WritableAlistFile) Write(p []byte) (n int, err error) {
+	if f.closed {
+		return 0, os.ErrClosed
+	}
+	return f.buffer.Write(p)
+}
+
+// Read 读取数据（写文件不支持读取）
+func (f *WritableAlistFile) Read(p []byte) (n int, err error) {
+	return 0, os.ErrInvalid
+}
+
+// ReadAt 在指定位置读取数据（写文件不支持）
+func (f *WritableAlistFile) ReadAt(p []byte, off int64) (n int, err error) {
+	return 0, os.ErrInvalid
+}
+
+// Seek 移动文件指针
+func (f *WritableAlistFile) Seek(offset int64, whence int) (int64, error) {
+	// 对于写入模式，简化 Seek 操作
+	switch whence {
+	case io.SeekStart:
+		if offset == 0 {
+			return 0, nil
+		}
+	case io.SeekCurrent:
+		return int64(f.buffer.Len()), nil
+	case io.SeekEnd:
+		return int64(f.buffer.Len()), nil
+	}
+	return int64(f.buffer.Len()), nil
+}
+
+// Close 关闭文件并上传到 alist
+func (f *WritableAlistFile) Close() error {
+	if f.closed {
+		return nil
+	}
+	f.closed = true
+
+	// TODO: 实现文件上传到 alist
+	log.Warnf("File upload not yet implemented: %s (%d bytes)", f.path, f.buffer.Len())
+
+	return nil
+}
+
+// Lock 锁定文件
+func (f *WritableAlistFile) Lock() error {
+	return nil
+}
+
+// Unlock 解锁文件
+func (f *WritableAlistFile) Unlock() error {
+	return nil
+}
+
+// Truncate 截断文件
+func (f *WritableAlistFile) Truncate(size int64) error {
+	if f.closed {
+		return os.ErrClosed
+	}
+
+	if size == 0 {
+		f.buffer.Reset()
+		return nil
+	}
+
+	// 简单实现：如果 size 小于当前大小，截断缓冲区
+	if size < int64(f.buffer.Len()) {
+		data := f.buffer.Bytes()[:size]
+		f.buffer.Reset()
+		f.buffer.Write(data)
+	}
+
+	return nil
 }

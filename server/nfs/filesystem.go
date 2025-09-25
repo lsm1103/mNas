@@ -2,6 +2,7 @@ package nfs
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,9 +43,16 @@ func (fs *AlistFS) Open(filename string) (billy.File, error) {
 func (fs *AlistFS) OpenFile(filename string, flag int, perm os.FileMode) (billy.File, error) {
 	fullPath := fs.getFullPath(filename)
 
-	// 如果是写入模式，暂时返回错误（需要后续实现上传功能）
-	if flag&os.O_WRONLY != 0 || flag&os.O_RDWR != 0 || flag&os.O_CREATE != 0 {
-		return nil, os.ErrPermission
+	// 检查是否为创建新文件
+	if flag&os.O_CREATE != 0 {
+		// 尝试获取文件，如果不存在则创建临时文件句柄
+		_, err := fs.getObject(fullPath)
+		if err != nil {
+			// 文件不存在，创建新文件（目前返回临时文件）
+			if flag&(os.O_WRONLY|os.O_RDWR) != 0 {
+				return NewWritableAlistFile(fullPath, fs), nil
+			}
+		}
 	}
 
 	// 获取文件信息
@@ -55,6 +63,11 @@ func (fs *AlistFS) OpenFile(filename string, flag int, perm os.FileMode) (billy.
 
 	if obj.IsDir() {
 		return nil, os.ErrInvalid
+	}
+
+	// 如果是写入模式，返回可写文件句柄
+	if flag&(os.O_WRONLY|os.O_RDWR) != 0 {
+		return NewWritableAlistFile(fullPath, fs), nil
 	}
 
 	// 获取下载链接
@@ -79,13 +92,15 @@ func (fs *AlistFS) Stat(filename string) (os.FileInfo, error) {
 
 // Rename 重命名文件
 func (fs *AlistFS) Rename(oldpath, newpath string) error {
-	// 暂时不支持重命名
+	// TODO: 实现重命名功能
+	log.Warnf("Rename operation not yet implemented: %s -> %s", oldpath, newpath)
 	return os.ErrPermission
 }
 
 // Remove 删除文件
 func (fs *AlistFS) Remove(filename string) error {
-	// 暂时不支持删除
+	// TODO: 实现删除功能
+	log.Warnf("Remove operation not yet implemented: %s", filename)
 	return os.ErrPermission
 }
 
@@ -96,7 +111,10 @@ func (fs *AlistFS) Join(elem ...string) string {
 
 // TempFile 创建临时文件
 func (fs *AlistFS) TempFile(dir, prefix string) (billy.File, error) {
-	return nil, os.ErrPermission
+	// 使用时间戳生成临时文件名
+	tempName := fmt.Sprintf("%s%d.tmp", prefix, time.Now().UnixNano())
+	tempPath := fs.Join(dir, tempName)
+	return NewWritableAlistFile(tempPath, fs), nil
 }
 
 // ReadDir 读取目录
@@ -129,7 +147,8 @@ func (fs *AlistFS) ReadDir(path string) ([]os.FileInfo, error) {
 
 // MkdirAll 创建目录（包括父目录）
 func (fs *AlistFS) MkdirAll(filename string, perm os.FileMode) error {
-	// 暂时不支持创建目录
+	// TODO: 实现目录创建功能
+	log.Warnf("MkdirAll operation not yet implemented: %s", filename)
 	return os.ErrPermission
 }
 
